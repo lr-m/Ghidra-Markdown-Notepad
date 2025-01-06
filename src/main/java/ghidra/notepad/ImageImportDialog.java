@@ -171,7 +171,7 @@ public class ImageImportDialog extends JDialog {
 
             // Generate unique filename
             String timestamp = String.format("%1$tY%1$tm%1$td_%1$tH%1$tM%1$tS", new Date());
-            String filename = "image_" + timestamp + "." + currentImageFormat;
+            String filename = timestamp + "." + currentImageFormat;
             Path imagePath = imagesDir.resolve(filename);
 
             // Save image in original format

@@ -20,7 +20,7 @@ The result is a nice `Markdown Notepad` window that can be placed in a convenien
 
 ![crayon.png](/readme_images/vaporwave_both.png)
 
-And for the light-mode sadists
+And for the light-mode sadists:
 
 ![crayon.png](/readme_images/light_both.png)
 
@@ -29,6 +29,7 @@ And for the light-mode sadists
 **My favourite features:**
 
 - Using `[0x1234]` syntax to make addresses clickable in the preview (makes Ghidra go to that address)
+- Using `{0x5678}` syntax to create an address link that is previewed as the function name at that address (no more fear of inconsistent function names for the same function in notes!)
 - Ghidra theme integration (syntax highlighting and preview colours match the selected Ghidra theme)
 - Auto-opening of same collection on restart
 - Search all documents, easy to flick through results with arrow keys
@@ -36,6 +37,7 @@ And for the light-mode sadists
 - Built into Ghidra so no juggling Obsidian window around
 - Easy file organisation in the file tree on the left of the window
 - Easy to navigate between collections of notes if needed
+- Contents listing for easy navigation within long markdown notes
 
 **More specific:**
 
@@ -51,16 +53,20 @@ And for the light-mode sadists
     - Undo/redo functionality
     - Document and collection-wide search
     - Support for tables
+    - Contents listing for easy navigation and overview
+    - Zoom support
+    - Easy navigation to previous notes with back/forward buttons
 - *Image Support*
     - Drag-and-drop image importing
     - Clipboard paste support for images
 - *Navigation and Integration*
     - Program address linking (`[0x1234]` syntax for direct navigation)
+    - Function address linking (`{0x5678}` syntax for function name preview + address navigation)
     - Clickable web links in preview
     - Keyboard shortcuts for all major operations
-    - Integration with Ghidra's theming system
+    - Integration with the Ghidra theming system
 - *Search Capabilities*
-    - Real-time document search
+    - Document search
     - Collection-wide search with context preview
     - Case-sensitive search option
     - Results navigation
@@ -79,6 +85,10 @@ And for the light-mode sadists
 | Import Image | Ctrl+I |
 | Document Search | Ctrl+F |
 | Collection Search | Ctrl+Shift+F |
+| Zoom In | Ctrl+Equals |
+| Zoom Out | Ctrl+Minus |
+| Go Back | Alt+Left |
+| Go Forwards | Alt+Right |
 
 ## Requirements
 
@@ -105,4 +115,3 @@ The plugin is built on the following key components:
 9. Should see the `MarkdownNotepadPlugin` in the list, if so, make sure the first tick box in the row is ticked
 10. Should now be all good to write some notes!
 
-![crayon.png](/readme_images/setup.png)

@@ -57,6 +57,32 @@ import java.awt.event.KeyEvent;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 
+// Add these imports to MarkdownNotepadProvider.java
+import java.awt.FlowLayout;
+import java.awt.Font;
+import java.awt.Component;
+import javax.swing.text.html.HTMLDocument;
+
+// Make sure these are already present
+import javax.swing.*;
+import java.awt.*;
+import java.awt.event.*;
+import javax.swing.text.*;
+import java.nio.file.*;
+import java.io.IOException;
+import java.util.*;
+import docking.*;
+import ghidra.framework.options.Options;
+import ghidra.framework.plugintool.ComponentProviderAdapter;
+import ghidra.framework.plugintool.PluginTool;
+import ghidra.program.model.listing.Program;
+import javax.swing.tree.*;
+
+import generic.theme.Gui;
+
+import javax.swing.text.html.StyleSheet;
+import javax.swing.text.html.HTMLEditorKit;
+
 import ghidra.notepad.SearchUtils.SearchResultCallback;
 import ghidra.notepad.DocumentState;
 import ghidra.notepad.ImageImportDialog;
@@ -69,6 +95,8 @@ import ghidra.notepad.FileTreeCellRenderer;
 import ghidra.notepad.DocumentStateHandler;
 import ghidra.notepad.FileStateHandler;
 import ghidra.notepad.SearchUtils;
+import ghidra.notepad.NavigationHistory;
+import ghidra.notepad.TableOfContents;
 
 /**
  * Core component provider that implements the main notepad interface.
@@ -95,7 +123,7 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
     private JEditorPane previewPane;
     private Parser markdownParser;
     private HtmlRenderer htmlRenderer;
-    private Timer previewUpdateTimer;
+    private javax.swing.Timer previewUpdateTimer;
     private JSplitPane splitPane;
     private Program currentProgram;
 
@@ -111,12 +139,22 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
     private List<Integer> currentSearchPositions = Collections.emptyList(); // Initialize to empty list
     private int currentSearchIndex = -1;
 
+    private NavigationHistory navigationHistory;
+    private TableOfContents tableOfContents;
+    private JSplitPane verticalSplitPane;
+    private float currentZoomFactor = 1.0f;
+
     public MarkdownNotepadProvider(PluginTool tool, String owner) {
         super(tool, WINDOW_TITLE, owner);
         setIcon(new ImageIcon(getClass().getResource("/images/logo.png")));
         documentStates = new HashMap<>();
         documentListeners = new ArrayList<>();
+        navigationHistory = new NavigationHistory();
         initializeComponents();
+        
+        // Initialize tree operations after components are created
+        treeOperations = new TreeOperations(rootNode, treeModel, fileTree);
+        
         fileOperations = new FileOperations(
             mainPanel,
             previewPane,
@@ -131,6 +169,7 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         );
         actionManager = new ActionManager(this, tool);
         loadLastCollection();
+        loadZoomPreference();
         setVisible(true);
     }
 
@@ -193,7 +232,7 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
 
     private void initializeComponents() {
         mainPanel = new JPanel(new BorderLayout());
-        
+
         // Initialize markdown parser and renderer
         markdownParser = Parser.builder()
             .extensions(Arrays.asList(TablesExtension.create()))
@@ -202,73 +241,128 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
             .extensions(Arrays.asList(TablesExtension.create()))
             .build();
         
-        // Create tabbed pane
-        tabbedPane = new JTabbedPane();
-        
-        // Initialize a default editor that will be replaced with document-specific editors
-        // Initialize a default editor
-        editor = new RSyntaxTextArea(20, 60);
-        editor.setSyntaxEditingStyle(SyntaxConstants.SYNTAX_STYLE_MARKDOWN);
-        editor.setCodeFoldingEnabled(true);
-        editor.setAntiAliasingEnabled(true);
-        editor.setLineWrap(true);
-        editor.setWrapStyleWord(true);
+
+        // Initialize editor
+        editor = EditorUtils.createNewEditor();
         EditorUtils.applyEditorStyling(editor);
-        
-        // Initialize file tree components
-        rootNode = new DefaultMutableTreeNode("Select a directory...");
-        treeModel = new DefaultTreeModel(rootNode);
-        fileTree = new JTree(treeModel);
-        
-        // Enable drag and drop
-        fileTree.setDragEnabled(true);
-        fileTree.setDropMode(DropMode.ON_OR_INSERT);
-        fileTree.setTransferHandler(new FileTreeTransferHandler());
-        
-        // Custom cell renderer to show unsaved changes and proper icons
-        FileTreeCellRenderer renderer = new FileTreeCellRenderer(this, rootNode);
-        fileTree.setCellRenderer(renderer);
-
-        // After creating the fileTree, add these lines:
-        fileTree.setRowHeight(0); // Let rows be as tall as they need to be
-        fileTree.setLargeModel(true); // Optimize for large trees
-        fileTree.setExpandsSelectedPaths(true);
-        
-        addTreeListener();
-
-        treeOperations = new TreeOperations(rootNode, treeModel, fileTree);
         
         // Create preview panel
         previewPane = new JEditorPane();
         previewPane.setEditable(false);
         previewPane.setContentType("text/html");
+        previewPane.setBorder(null);
+
         previewUtils = new PreviewUtils(previewPane, markdownParser, htmlRenderer, mainPanel, previewUpdateTimer, editor);
         previewUtils.setAddressNavigationHandler(this::navigateToAddress);
+        
+        // Add function name resolution
+        previewUtils.setFunctionNameResolver(address -> {
+            // Get the program manager service
+            ProgramManager programManager = tool.getService(ProgramManager.class);
+            if (programManager == null || programManager.getCurrentProgram() == null) {
+                return address;
+            }
 
-        // Create preview update timer
-        previewUpdateTimer = new Timer(500, e -> previewUtils.updatePreview(editor.getText()));
-        previewUpdateTimer.setRepeats(false);
-        
-        // Add components to tabs
-        tabbedPane.addTab("Edit", new RTextScrollPane(editor, false));
-        tabbedPane.addTab("Preview", new JScrollPane(previewPane));
-        
-        // Add tab change listener
-        tabbedPane.addChangeListener(e -> {
-            if (tabbedPane.getSelectedIndex() == 1) { // Preview tab
-                previewUtils.updatePreview(editor.getText());
+            try {
+                // Remove any '0x' prefix and convert to long
+                String cleanAddress = address.replaceAll("^0x", "");
+                long offset = Long.parseLong(cleanAddress, 16);
+                
+                // Get the address in the program
+                Program program = programManager.getCurrentProgram();
+                Address addr = program.getAddressFactory().getDefaultAddressSpace().getAddress(offset);
+                
+                // Try to get function at this address
+                ghidra.program.model.listing.Function function = 
+                    program.getFunctionManager().getFunctionAt(addr);
+                
+                // Return function name if found, otherwise return the address
+                return function != null ? function.getName() : address;
+            } catch (Exception e) {
+                return address;
             }
         });
+
+        // Create preview update timer
+        previewUpdateTimer = new javax.swing.Timer(500, e -> previewUtils.updatePreview(editor.getText()));
+        previewUpdateTimer.setRepeats(false);
         
-        // Create split pane with file tree and tabbed pane
-        splitPane = new JSplitPane(
-            JSplitPane.HORIZONTAL_SPLIT,
-            new JScrollPane(fileTree),
-            tabbedPane
-        );
-        splitPane.setDividerLocation(200);
+        // Create tabbed pane
+        tabbedPane = new JTabbedPane();
+        tabbedPane.setFocusable(false);
+
+        // Create scroll panes with no borders
+        RTextScrollPane editScrollPane = new RTextScrollPane(editor, true);
+        editScrollPane.setBorder(null);
+
+        JScrollPane previewScrollPane = new JScrollPane(previewPane);
+        previewScrollPane.setBorder(null);
+
+        // Add components to tabs
+        tabbedPane.addTab("Edit", editScrollPane);
+        tabbedPane.addTab("Preview", previewScrollPane);
+
+        // Initialize file tree components
+        rootNode = new DefaultMutableTreeNode("Open/Create a Collection...");
+        treeModel = new DefaultTreeModel(rootNode);
+        fileTree = new JTree(treeModel);
+        fileTree.setDragEnabled(true);
+        fileTree.setDropMode(DropMode.ON_OR_INSERT);
+        fileTree.setTransferHandler(new FileTreeTransferHandler());                            // And this line
         
+        // Set file tree properties
+        fileTree.setRowHeight(0);
+        fileTree.setLargeModel(true);
+        fileTree.setExpandsSelectedPaths(true);
+        fileTree.setBackground(editor.getBackground());
+        
+        // Create custom cell renderer
+        FileTreeCellRenderer renderer = new FileTreeCellRenderer(this, rootNode);
+        fileTree.setCellRenderer(renderer);
+        
+        // Create common border style
+        Color bgColor = editor.getBackground();
+        javax.swing.border.Border etchedBorder = BorderFactory.createEtchedBorder(bgColor, bgColor);
+
+        // Create file tree panel with scroll pane
+        JScrollPane treeScrollPane = new JScrollPane(fileTree);
+        treeScrollPane.setBorder(BorderFactory.createTitledBorder(
+            etchedBorder,
+            "Files",
+            javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION,
+            javax.swing.border.TitledBorder.DEFAULT_POSITION,
+            null,
+            editor.getForeground()
+        ));
+        
+        // Create and setup table of contents
+        tableOfContents = new TableOfContents();
+        JScrollPane scrollPane = (JScrollPane) tableOfContents.getComponent(0);
+        scrollPane.setBorder(BorderFactory.createTitledBorder(
+            etchedBorder,
+            "Contents",
+            javax.swing.border.TitledBorder.DEFAULT_JUSTIFICATION,
+            javax.swing.border.TitledBorder.DEFAULT_POSITION,
+            null,
+            editor.getForeground()
+        ));
+        
+        // Create vertical split between file tree and TOC
+        verticalSplitPane = new JSplitPane(JSplitPane.VERTICAL_SPLIT, 
+            treeScrollPane, 
+            scrollPane);
+        verticalSplitPane.setDividerLocation(400);
+        
+        // Create main horizontal split
+        splitPane = new JSplitPane(JSplitPane.HORIZONTAL_SPLIT,
+            verticalSplitPane,
+            tabbedPane);
+        splitPane.setDividerLocation(250);
+        
+        // Add split pane to main panel
         mainPanel.add(splitPane, BorderLayout.CENTER);
+        
+        addTreeListener();
     }
 
     private void addTreeListener() {
@@ -284,9 +378,11 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
                 Object userObject = node.getUserObject();
                 
                 if (e.isPopupTrigger()) {
-                    if (userObject instanceof FileNode) {
+                    if (node == rootNode) {
+                        showRootContextMenu(e);
+                    } else if (userObject instanceof FileNode) {
                         showFileContextMenu(e, (FileNode) userObject);
-                    } else if (userObject instanceof String && node != rootNode) {
+                    } else if (userObject instanceof String) {
                         showDirectoryContextMenu(e, node);
                     }
                 }
@@ -302,9 +398,11 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
                 Object userObject = node.getUserObject();
                 
                 if (e.isPopupTrigger()) {
-                    if (userObject instanceof FileNode) {
+                    if (node == rootNode) {
+                        showRootContextMenu(e);
+                    } else if (userObject instanceof FileNode) {
                         showFileContextMenu(e, (FileNode) userObject);
-                    } else if (userObject instanceof String && node != rootNode) {
+                    } else if (userObject instanceof String) {
                         showDirectoryContextMenu(e, node);
                     }
                 }
@@ -337,6 +435,18 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
                 
                 contextMenu.show(e.getComponent(), e.getX(), e.getY());
             }
+
+            private void showRootContextMenu(MouseEvent e) {
+                if (currentDirectory != null) {
+                    JPopupMenu contextMenu = new JPopupMenu();
+                    
+                    JMenuItem renameItem = new JMenuItem("Rename Collection");
+                    renameItem.addActionListener(ev -> renameCollection());
+                    contextMenu.add(renameItem);
+                    
+                    contextMenu.show(e.getComponent(), e.getX(), e.getY());
+                }
+            }
         };
         
         // Add both the selection listener and mouse listener
@@ -349,6 +459,67 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         });
         
         fileTree.addMouseListener(mouseAdapter);
+    }
+
+
+    private void renameCollection() {
+        String newName = JOptionPane.showInputDialog(
+            mainPanel,
+            "Enter new collection name:",
+            "Rename Collection",
+            JOptionPane.PLAIN_MESSAGE);
+            
+        if (newName != null && !newName.trim().isEmpty()) {
+            try {
+                Path parent = currentDirectory.getParent();
+                Path newPath = parent.resolve(newName);
+                Path oldPath = currentDirectory;
+                
+                if (Files.exists(newPath)) {
+                    JOptionPane.showMessageDialog(mainPanel,
+                        "A collection with this name already exists",
+                        "Collection Exists",
+                        JOptionPane.WARNING_MESSAGE);
+                    return;
+                }
+                
+                Files.move(oldPath, newPath);
+                currentDirectory = newPath;
+                rootNode.setUserObject(newName);
+                treeModel.nodeChanged(rootNode);
+                
+                // Update document states
+                updateDocumentStates(oldPath, newPath);
+                
+                // Update paths in other components
+                previewUtils.setCurrentDirectory(newPath);
+                treeOperations.setCurrentDirectory(newPath);
+                fileOperations = new FileOperations(
+                    mainPanel,
+                    previewPane,
+                    newPath,
+                    tabbedPane,
+                    this::refreshTree,
+                    this::loadFile,
+                    this,
+                    this,
+                    treeModel,
+                    fileTree
+                );
+                
+                // Save new collection path preference
+                saveCollectionPreference(newPath);
+                
+                // Refresh the tree to ensure all paths are updated
+                refreshTree();
+                
+            } catch (IOException e) {
+                JOptionPane.showMessageDialog(mainPanel,
+                    "Error renaming collection: " + e.getMessage(),
+                    "Error",
+                    JOptionPane.ERROR_MESSAGE);
+            }
+        }
     }
 
     @Override
@@ -408,10 +579,47 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
     public void swapEditor(RSyntaxTextArea newEditor) {
         editor = newEditor;
         RTextScrollPane scrollPane = new RTextScrollPane(editor, false);
+        scrollPane.setBorder(null);
         tabbedPane.setComponentAt(0, scrollPane);
     }
 
+    private void setupEditorListeners(RSyntaxTextArea editor) {
+        editor.getDocument().addDocumentListener(new DocumentListener() {
+            private void updateState() {
+                if (currentDocument != null && !currentDocument.hasUnsavedChanges()) {
+                    currentDocument.setUnsavedChanges(true);
+                }
+                // Update TOC
+                tableOfContents.scheduleUpdate(editor.getText());
+                // Update preview
+                previewUpdateTimer.restart();
+                // Update undo/redo state
+                SwingUtilities.invokeLater(() -> updateUndoRedoActions());
+            }
+            
+            @Override
+            public void insertUpdate(DocumentEvent e) { updateState(); }
+            @Override
+            public void removeUpdate(DocumentEvent e) { updateState(); }
+            @Override
+            public void changedUpdate(DocumentEvent e) { updateState(); }
+        });
+    }
+
+    // Modify the loadFile method to add editor listeners
     private void loadFile(Path file) {
+        // Add to navigation history
+        navigationHistory.addLocation(file);
+        updateNavigationButtons();
+
+        // Find and select the corresponding tree node
+        DefaultMutableTreeNode treeNode = treeOperations.findNodeForPath(file);
+        if (treeNode != null) {
+            TreePath path = new TreePath(treeNode.getPath());
+            fileTree.setSelectionPath(path);
+            fileTree.scrollPathToVisible(path);
+        }
+
         if (currentFile != null && currentDocument != null) {
             documentStates.put(currentFile, currentDocument);
         }
@@ -423,46 +631,68 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         // Check if this is an image file
         if (fileName.endsWith(".png") || fileName.endsWith(".jpg") || 
             fileName.endsWith(".jpeg")) {
-            fileOperations.loadImagePreview(file, editor.getBackground(), editor.getForeground());
+            fileOperations.loadImagePreview(file, editor.getBackground(), editor.getForeground(), tableOfContents);
             return;
         }
         
         // Re-enable edit tab for non-image files
         tabbedPane.setEnabledAt(0, true);
         
-        // Find the tree node for this file
-        DefaultMutableTreeNode node = treeOperations.findNodeForPath(file);
-        
         // Load existing document state or create new one
         currentDocument = documentStates.computeIfAbsent(file, k -> {
             try {
-                return new DocumentState(Files.readString(k), k, treeModel, node, fileTree,
-                    this::updateUndoRedoActions);  // Pass the callback
+                return new DocumentState(Files.readString(k), k, treeModel, treeNode, fileTree,
+                    this::updateUndoRedoActions);
             } catch (IOException e) {
                 e.printStackTrace();
-                return new DocumentState("", k, treeModel, node, fileTree,
-                    this::updateUndoRedoActions);  // Pass the callback
+                return new DocumentState("", k, treeModel, treeNode, fileTree,
+                    this::updateUndoRedoActions);
             }
         });
         
-        // Apply styling to the editor after creation
+        // Apply styling to the editor
         EditorUtils.applyEditorStyling(currentDocument.getEditor());
         
         // Swap the editor in the UI
         RTextScrollPane scrollPane = new RTextScrollPane(currentDocument.getEditor(), false);
+        scrollPane.setBorder(null);
         tabbedPane.setComponentAt(0, scrollPane);
         editor = currentDocument.getEditor();
         
+        // Setup editor listeners
+        setupEditorListeners(editor);
+        
+        // Apply current zoom level to new editor
+        currentDocument.applyZoom(currentZoomFactor);
+        
         // Update preview
         previewUtils.updatePreview(editor.getText());
+        
+        // Update table of contents with initial content
+        tableOfContents.updateToc(editor.getText(), position -> {
+            if (tabbedPane.getSelectedIndex() == 0) {
+                editor.setCaretPosition(position);
+                editor.requestFocusInWindow();
+            } else {
+                try {
+                    previewPane.scrollRectToVisible(
+                        previewPane.modelToView(position));
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
+            }
+        });
         
         // Update initial undo/redo states
         updateUndoRedoActions();
     }
 
     public void loadDirectory(Path directory) {
-        // Clear the editor and preview when loading a new collection
+        // Reset all state when loading a new collection
         clearEditorAndPreview();
+        navigationHistory.reset();
+        updateNavigationButtons();
+        documentStates.clear();
 
         currentDirectory = directory;
         treeOperations.setCurrentDirectory(directory);
@@ -976,5 +1206,73 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
     @Override
     public JComponent getComponent() {
         return mainPanel;
+    }
+
+    public void changeZoom(float delta) {
+        currentZoomFactor += delta;
+        currentZoomFactor = Math.max(0.5f, Math.min(2.5f, currentZoomFactor));
+        
+        // Update editor font
+        if (currentDocument != null) {
+            currentDocument.applyZoom(currentZoomFactor);
+        } else {
+            Font currentFont = editor.getFont();
+            float newSize = 14 * currentZoomFactor;
+            editor.setFont(currentFont.deriveFont(newSize));
+        }
+        
+        // Update preview font sizes
+        float baseFontSize = 14.0f;
+        StyleSheet styleSheet = ((HTMLEditorKit)previewPane.getEditorKit()).getStyleSheet();
+        
+        // Base text size
+        styleSheet.addRule("body { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
+        styleSheet.addRule("p { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
+        
+        // Headers
+        styleSheet.addRule("h1 { font-size: " + (baseFontSize * 2.0 * currentZoomFactor) + "px; }");
+        styleSheet.addRule("h2 { font-size: " + (baseFontSize * 1.8 * currentZoomFactor) + "px; }");
+        styleSheet.addRule("h3, h4, h5, h6 { font-size: " + (baseFontSize * 1.5 * currentZoomFactor) + "px; }");
+        
+        // Other elements
+        styleSheet.addRule("code { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
+        styleSheet.addRule("pre { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
+        styleSheet.addRule("blockquote { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
+        styleSheet.addRule("li { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
+        styleSheet.addRule("td, th { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
+        
+        // Force preview refresh
+        String currentContent = editor.getText();
+        previewUtils.updatePreview(currentContent);
+        
+        // Save zoom preference
+        Options options = tool.getOptions("MarkdownNotepad");
+        options.setFloat("ZoomFactor", currentZoomFactor);
+    }
+
+    private void loadZoomPreference() {
+        Options options = tool.getOptions("MarkdownNotepad");
+        currentZoomFactor = options.getFloat("ZoomFactor", 1.0f);
+        changeZoom(0); // Apply saved zoom
+    }
+
+    public void navigateBack() {
+        Path previousPath = navigationHistory.goBack();
+        if (previousPath != null) {
+            loadFile(previousPath);
+            updateNavigationButtons();
+        }
+    }
+
+    public void navigateForward() {
+        Path nextPath = navigationHistory.goForward();
+        if (nextPath != null) {
+            loadFile(nextPath);
+            updateNavigationButtons();
+        }
+    }
+
+    private void updateNavigationButtons() {
+        actionManager.updateNavigationButtons(navigationHistory.canGoBack(), navigationHistory.canGoForward());
     }
 }

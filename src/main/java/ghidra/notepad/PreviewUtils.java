@@ -20,6 +20,10 @@ import javax.imageio.ImageIO;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 import generic.theme.Gui;
 
+import javax.swing.text.MutableAttributeSet;
+import javax.swing.text.StyleConstants;
+import javax.swing.text.SimpleAttributeSet;
+
 /**
  * Handles the rendering and updating of the markdown preview pane.
  * Processes markdown content into HTML, manages image paths, and
@@ -35,9 +39,10 @@ public class PreviewUtils {
     private Path currentDirectory;
     private final RSyntaxTextArea editor;  // Add this field
     private AddressNavigationHandler navigationHandler;
+    private FunctionNameResolver functionNameResolver;
 
     public PreviewUtils(JEditorPane previewPane, Parser markdownParser, HtmlRenderer htmlRenderer, 
-                   JPanel mainPanel, Timer previewUpdateTimer, RSyntaxTextArea editor) {
+                       JPanel mainPanel, Timer previewUpdateTimer, RSyntaxTextArea editor) {
         this.previewPane = previewPane;
         this.markdownParser = markdownParser;
         this.htmlRenderer = htmlRenderer;
@@ -45,10 +50,17 @@ public class PreviewUtils {
         this.previewUpdateTimer = previewUpdateTimer;
         this.editor = editor;
         initializeHtmlKit();
+
+        // Initialize with a default resolver that just returns the address
+        this.functionNameResolver = address -> address;
     }
 
     public void setAddressNavigationHandler(AddressNavigationHandler handler) {
         this.navigationHandler = handler;
+    }
+
+    public void setFunctionNameResolver(FunctionNameResolver resolver) {
+        this.functionNameResolver = resolver;
     }
 
     public void setCurrentFile(Path currentFile) {
@@ -76,8 +88,10 @@ public class PreviewUtils {
         Color linkColor = Gui.getColor("color.fg.decompiler.variable");
         Color codeColor = Gui.getColor("color.fg.decompiler.comment");
         Color blockquoteColor = Gui.getColor("color.fg.decompiler.global");
-        Color background = editor.getBackground();
-        Color foreground = editor.getForeground();
+        
+        // Get the exact same colors as used in the editor
+        Color background = Gui.getColor("color.bg");
+        Color foreground = Gui.getColor("color.fg");
 
         // Convert colors to hex strings for CSS
         String headerHex = String.format("#%02x%02x%02x", 
@@ -98,13 +112,14 @@ public class PreviewUtils {
             foreground.getRed(), foreground.getGreen(), foreground.getBlue());
 
         // Apply consistent styling
-        styleSheet.addRule("body { font-family: Arial, sans-serif; margin: 20px; background-color: " + bgHex + "; color: " + fgHex + "; }");
-        styleSheet.addRule("h1 { color: " + linkHex + "; }");
-        styleSheet.addRule("h2 { color: " + headerHex + "; }");
-        styleSheet.addRule("h3, h4, h5, h6 { color: " + boldHex + "; }");
-        styleSheet.addRule("strong { color: " + italicHex + "; }");
+        float baseSize = 14;
+        styleSheet.addRule("body { font-family: Arial, sans-serif; margin: 20px; background-color: " + bgHex + "; color: " + fgHex + "; font-size: " + baseSize + "px; line-height: 1.6; }");
+        styleSheet.addRule("h1 { color: " + headerHex + "; font-size: " + (baseSize * 2.0) + "px; }");
+        styleSheet.addRule("h2 { color: " + linkHex + "; font-size: " + (baseSize * 1.8) + "px; }");
+        styleSheet.addRule("h3, h4, h5, h6 { color: " + boldHex + "; font-size: " + (baseSize * 1.5) + "px; }");
+        styleSheet.addRule("strong { color: " + boldHex + "; }");
         styleSheet.addRule("em { color: " + italicHex + "; }");
-        styleSheet.addRule("a { color: " + linkHex + "; text-decoration: underline; }");
+        styleSheet.addRule("a { color: " + headerHex + "; text-decoration: underline; }");
         styleSheet.addRule("code { color: " + codeHex + "; background-color: " + background.brighter() + "; padding: 2px 4px; border-radius: 4px; font-family: monospace; }");
         styleSheet.addRule("pre { background-color: " + background.brighter() + "; padding: 10px; border-radius: 4px; }");
         styleSheet.addRule("pre code { background-color: transparent; padding: 0; }");
@@ -249,15 +264,30 @@ public class PreviewUtils {
         }
         matcher.appendTail(result);
         
-        // Then process address patterns
+        // Then process function references with curly braces
         String processedHtml = result.toString();
-        pattern = Pattern.compile("\\[(0x[0-9a-fA-F]+|[0-9a-fA-F]+)\\]");
+        pattern = Pattern.compile("\\{(0x[0-9a-fA-F]+|[0-9a-fA-F]+)\\}");
         matcher = pattern.matcher(processedHtml);
         result = new StringBuffer();
         
         while (matcher.find()) {
             String address = matcher.group(1);
-            String replacement = String.format("<a href=\"address://%s\">[%s]</a>", 
+            String functionName = functionNameResolver.getFunctionName(address);
+            String displayText = functionName != null ? functionName : address;
+            String replacement = String.format("<a href=\"address://%s\">%s</a>", 
+                address, displayText);
+            matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
+        }
+        matcher.appendTail(result);
+        
+        // Finally process address references with square brackets (existing code)
+        pattern = Pattern.compile("\\[(0x[0-9a-fA-F]+|[0-9a-fA-F]+)\\]");
+        matcher = pattern.matcher(result.toString());
+        result = new StringBuffer();
+        
+        while (matcher.find()) {
+            String address = matcher.group(1);
+            String replacement = String.format("<a href=\"address://%s\">%s</a>", 
                 address, address);
             matcher.appendReplacement(result, Matcher.quoteReplacement(replacement));
         }
@@ -268,5 +298,9 @@ public class PreviewUtils {
 
     public interface AddressNavigationHandler {
         void navigateToAddress(String address);
+    }
+
+    public interface FunctionNameResolver {
+        String getFunctionName(String address);
     }
 }
