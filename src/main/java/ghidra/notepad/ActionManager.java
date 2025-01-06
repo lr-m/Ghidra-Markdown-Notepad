@@ -20,6 +20,8 @@ public class ActionManager {
     private final PluginTool tool;
     private DockingAction undoAction;
     private DockingAction redoAction;
+    private DockingAction backAction;
+    private DockingAction forwardAction;
 
     public ActionManager(MarkdownNotepadProvider provider, PluginTool tool) {
         this.provider = provider;
@@ -31,6 +33,7 @@ public class ActionManager {
         createCollectionActions();
         createFileActions();
         createSearchActions();
+        createNavigationActions();
     }
 
     private void createCollectionActions() {
@@ -155,6 +158,52 @@ public class ActionManager {
             "/images/find_all.png", "Search in collection");
     }
 
+    private void createNavigationActions() {
+        // Zoom In (Ctrl+=)
+        DockingAction zoomInAction = new DockingAction("Zoom In", provider.getName()) {
+            @Override
+            public void actionPerformed(ActionContext context) {
+                provider.changeZoom(0.1f);
+            }
+        };
+        configureAction("View", zoomInAction, "Zoom In", 
+            KeyStroke.getKeyStroke(KeyEvent.VK_EQUALS, InputEvent.CTRL_DOWN_MASK),
+            "/images/zoom_in.png", "Zoom in");
+
+        // Zoom Out (Ctrl+-)
+        DockingAction zoomOutAction = new DockingAction("Zoom Out", provider.getName()) {
+            @Override
+            public void actionPerformed(ActionContext context) {
+                provider.changeZoom(-0.1f);
+            }
+        };
+        configureAction("View", zoomOutAction, "Zoom Out", 
+            KeyStroke.getKeyStroke(KeyEvent.VK_MINUS, InputEvent.CTRL_DOWN_MASK),
+            "/images/zoom_out.png", "Zoom out");
+
+        // Back
+        DockingAction backAction = new DockingAction("Back", provider.getName()) {
+            @Override
+            public void actionPerformed(ActionContext context) {
+                provider.navigateBack();
+            }
+        };
+        configureAction("Navigate", backAction, "Back", 
+            KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, InputEvent.ALT_DOWN_MASK),
+            "/images/back.png", "Go back");
+
+        // Forward
+        DockingAction forwardAction = new DockingAction("Forward", provider.getName()) {
+            @Override
+            public void actionPerformed(ActionContext context) {
+                provider.navigateForward();
+            }
+        };
+        configureAction("Navigate", forwardAction, "Forward", 
+            KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, InputEvent.ALT_DOWN_MASK),
+            "/images/forward.png", "Go forward");
+    }
+
     private void configureAction(String section, DockingAction action, String menuName, 
             int keyEvent, String iconPath, String tooltip) {
         configureAction(section, action, menuName, 
@@ -179,6 +228,15 @@ public class ActionManager {
         }
         if (redoAction != null) {
             redoAction.setEnabled(canRedo);
+        }
+    }
+
+    public void updateNavigationButtons(boolean canGoBack, boolean canGoForward) {
+        if (backAction != null) {
+            backAction.setEnabled(canGoBack);
+        }
+        if (forwardAction != null) {
+            forwardAction.setEnabled(canGoForward);
         }
     }
 }

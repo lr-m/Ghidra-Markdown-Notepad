@@ -10,13 +10,9 @@ import java.util.Map;
 import java.util.HashMap;
 import javax.imageio.ImageIO;
 
+import generic.theme.Gui;
 import ghidra.notepad.DocumentStateHandler;
 
-/**
- * Custom tree cell renderer that handles the visual presentation of files
- * and directories in the navigation tree. Provides file icons, unsaved
- * change indicators, and image thumbnails for the sidebar.
- */
 public class FileTreeCellRenderer extends DefaultTreeCellRenderer {
     private static final int THUMBNAIL_SIZE = 16; // Size to match other icons
     private final Icon folderIcon = UIManager.getIcon("Tree.closedIcon");
@@ -25,16 +21,45 @@ public class FileTreeCellRenderer extends DefaultTreeCellRenderer {
     private final Map<Path, Icon> imageIconCache = new HashMap<>();
     private final DocumentStateHandler documentStateHandler;
     private final DefaultMutableTreeNode rootNode;
+    private final Color background;
+    private final Color foreground;
+    private final Color selectionBackground;
+    private final Color selectionForeground;
     
     public FileTreeCellRenderer(DocumentStateHandler documentStateHandler, DefaultMutableTreeNode rootNode) {
         this.documentStateHandler = documentStateHandler;
         this.rootNode = rootNode;
+        
+        // Get system colors from Gui to match TableOfContents
+        this.background = Gui.getColor("color.bg");
+        this.foreground = Gui.getColor("color.fg");
+        this.selectionBackground = Gui.getColor("color.bg.selection");
+        this.selectionForeground = Gui.getColor("color.fg");
+        
+        // Set renderer colors
+        setBackgroundNonSelectionColor(background);
+        setBackgroundSelectionColor(selectionBackground);
+        setTextNonSelectionColor(foreground);
+        setTextSelectionColor(selectionForeground);
+        
+        // Important: Set these to null to allow proper background painting
+        setBackground(null);
+        setOpaque(false);
     }
     
     @Override
     public Component getTreeCellRendererComponent(JTree tree, Object value,
             boolean sel, boolean expanded, boolean leaf, int row, boolean hasFocus) {
         super.getTreeCellRendererComponent(tree, value, sel, expanded, leaf, row, hasFocus);
+        
+        // Set transparent background when not selected
+        if (!sel) {
+            setBackground(null);
+            setOpaque(false);
+        } else {
+            setBackground(selectionBackground);
+            setOpaque(true);
+        }
         
         DefaultMutableTreeNode node = (DefaultMutableTreeNode) value;
         if (node == rootNode) {

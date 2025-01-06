@@ -16,6 +16,12 @@ import ghidra.notepad.FileNode;
 import ghidra.notepad.DocumentStateHandler;
 import ghidra.notepad.FileStateHandler;
 
+import java.io.UncheckedIOException;
+import java.net.URI;
+import java.net.URISyntaxException;
+import java.net.URL;
+import java.util.Collections;
+
 /**
  * Handles all file system operations including creating, deleting, and
  * modifying files and directories. Also manages image imports and file
@@ -121,8 +127,11 @@ public class FileOperations {
         }
     }
 
-    public void loadImagePreview(Path file, Color backgroundColor, Color foregroundColor) {
+    public void loadImagePreview(Path file, Color backgroundColor, Color foregroundColor, TableOfContents tableOfContents) {
         try {
+            // Clear TOC for image files
+            tableOfContents.updateToc("", null);
+
             // Disable edit tab for images
             tabbedPane.setEnabledAt(0, false);
             
@@ -194,83 +203,52 @@ public class FileOperations {
     }
 
     public void createCollectionStructure(Path collectionPath) throws IOException {
-        Path welcomePath = collectionPath.resolve("welcome.md");
-        String welcomeContent = """
-            # Sample Markdown Document
+        // Get resource folder URL
+        URL defaultResourcesUrl = getClass().getResource("/default");
+        if (defaultResourcesUrl == null) {
+            throw new IOException("Could not find default resources directory");
+        }
 
-            ## Introduction
+        try {
+            // Handle both IDE and JAR execution
+            URI uri = defaultResourcesUrl.toURI();
+            Path resourcePath;
+            
+            if (uri.getScheme().equals("jar")) {
+                // Handle resources in JAR
+                FileSystem fileSystem = FileSystems.newFileSystem(uri, Collections.emptyMap());
+                resourcePath = fileSystem.getPath("/default");
+                copyResources(resourcePath, collectionPath);
+                fileSystem.close();
+            } else {
+                // Handle resources in IDE/filesystem
+                resourcePath = Paths.get(uri);
+                copyResources(resourcePath, collectionPath);
+            }
+        } catch (URISyntaxException e) {
+            throw new IOException("Error accessing default resources", e);
+        }
+    }
 
-            This is a sample markdown document showing various formatting options. Markdown is a lightweight markup language that you can use to add formatting elements to plaintext text documents.
-
-            ## Memory Addresses
-
-            Click to jump to this address in the binary - saves having to copy addresses all the time...
-
-            [0x1c9954]
-
-            [34038b]
-
-            ## Text Formatting
-
-            Here's how you can format text in different ways:
-            - **Bold text** is created using double asterisks
-            - *Italic text* uses single asterisks
-            - ***Bold and italic*** combines both
-
-            ## Lists
-
-            ### Unordered Lists
-
-            * First item
-            * Second item
-            * Nested item
-            * Another nested item
-            * Third item
-
-            ### Ordered Lists
-
-            1. First step
-            2. Second step
-            1. Sub-step one
-            2. Sub-step two
-            3. Third step
-
-            ## Links and Images
-
-            To import or paste an image, click the `Import Image` button, and paste/drag the image to the window, it will place the markdown in the current document cursor position.
-
-            [Visit my website](https://luke-m.xyz)
-
-            ![Alt text for an image](images/image.jpg)
-
-            ## Code
-
-            Inline code: `const greeting = "Hello, World!";`
-
-            Code block:
-            ```python
-            def greet(name):
-                print(f"Hello, {name}!")
-                return True
-
-            greet("User")
-            ```
-
-            ## Quotes
-
-            > This is a blockquote. You can use it to emphasize or quote text.
-            > 
-            > It can span multiple paragraphs if you add a > on the blank lines between them.
-
-            ## Tables
-
-            | Header 1 | Header 2 | Header 3 |
-            |----------|----------|----------|
-            | Row 1    | Data     | Data     |
-            | Row 2    | Data     | Data     |
-
-            """;
-        Files.writeString(welcomePath, welcomeContent);
+    private void copyResources(Path source, Path target) throws IOException {
+        Files.walk(source)
+            .forEach(sourcePath -> {
+                try {
+                    Path targetPath = target.resolve(source.relativize(sourcePath).toString());
+                    
+                    if (Files.isDirectory(sourcePath)) {
+                        Files.createDirectories(targetPath);
+                    } else {
+                        // Ensure parent directories exist
+                        Files.createDirectories(targetPath.getParent());
+                        
+                        // Copy the file with replace existing option
+                        Files.copy(sourcePath, targetPath, StandardCopyOption.REPLACE_EXISTING);
+                    }
+                } catch (IOException e) {
+                    throw new UncheckedIOException(e);
+                }
+            });
     }
 
     public void deleteFile(FileNode fileNode) {
@@ -308,16 +286,28 @@ public class FileOperations {
     }
 
     public void renameFile(FileNode fileNode) {
-        String newName = JOptionPane.showInputDialog(
+        String oldName = fileNode.getPath().getFileName().toString();
+        String oldExtension = "";
+        int dotIndex = oldName.lastIndexOf('.');
+        if (dotIndex > 0) {
+            oldExtension = oldName.substring(dotIndex);
+        }
+
+        String initialName = oldName.substring(0, dotIndex > 0 ? dotIndex : oldName.length());
+        String newName = (String) JOptionPane.showInputDialog(
             mainPanel,
             "Enter new name:",
             "Rename File",
-            JOptionPane.PLAIN_MESSAGE);
+            JOptionPane.PLAIN_MESSAGE,
+            null,
+            null,
+            initialName);
             
         if (newName != null && !newName.trim().isEmpty()) {
             try {
-                if (!newName.endsWith(".md")) {
-                    newName += ".md";
+                // Preserve the original extension
+                if (!newName.endsWith(oldExtension)) {
+                    newName += oldExtension;
                 }
                 
                 Path oldPath = fileNode.getPath();

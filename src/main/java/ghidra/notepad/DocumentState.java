@@ -4,10 +4,10 @@ import javax.swing.*;
 import javax.swing.event.*;
 import javax.swing.tree.*;
 import java.awt.Rectangle;
+import java.awt.Font;
 import java.nio.file.Path;
 import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
 import org.fife.ui.rsyntaxtextarea.SyntaxConstants;
-
 /**
  * Maintains the state of an individual document within the Markdown Notepad,
  * including its text content, editing history, and unsaved changes status.
@@ -48,6 +48,15 @@ public class DocumentState {
         this.editor.setAntiAliasingEnabled(true);
         this.editor.setLineWrap(true);
         this.editor.setWrapStyleWord(true);
+        
+        // Set default font size - will be scaled by zoom factor
+        this.editor.setFont(this.editor.getFont().deriveFont(14f));
+    }
+    
+    public void applyZoom(float zoomFactor) {
+        Font currentFont = editor.getFont();
+        float newSize = 14 * zoomFactor;
+        editor.setFont(currentFont.deriveFont(newSize));
     }
     
     private void setupDocumentListener() {
