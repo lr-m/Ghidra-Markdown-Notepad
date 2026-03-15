@@ -1,4 +1,3 @@
-// EditorUtils.java
 package ghidra.notepad;
 
 import generic.theme.Gui;
@@ -106,7 +105,7 @@ public class EditorUtils {
         
         // Apply the customized scheme
         editor.setSyntaxScheme(scheme);
-        
+
         // Additional editor settings
         editor.setTabSize(4);
         editor.setTabsEmulated(true);
@@ -119,4 +118,5 @@ public class EditorUtils {
         editor.setMarkOccurrences(false);
         editor.setFadeCurrentLineHighlight(false);
     }
+
 }

@@ -1,22 +1,17 @@
-// FileOperations.java
 package ghidra.notepad;
 
 import javax.swing.*;
-import java.awt.image.BufferedImage;
-import java.io.IOException;
-import java.nio.file.*;
-import javax.imageio.ImageIO;
-import java.awt.Color;
 import javax.swing.tree.DefaultMutableTreeNode;
 import javax.swing.tree.DefaultTreeModel;
-import javax.swing.JTree;
-import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
-
-import ghidra.notepad.FileNode;
-import ghidra.notepad.DocumentStateHandler;
-import ghidra.notepad.FileStateHandler;
-
+import java.awt.Color;
+import java.awt.image.BufferedImage;
+import java.io.IOException;
 import java.io.UncheckedIOException;
+import java.nio.file.*;
+import javax.imageio.ImageIO;
+import org.fife.ui.rsyntaxtextarea.RSyntaxTextArea;
+import generic.theme.Gui;
+
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.URL;
@@ -29,7 +24,7 @@ import java.util.Collections;
  */
 public class FileOperations {
     private final JPanel mainPanel;
-    private final JEditorPane previewPane;
+    private final CompositePreviewPanel previewPanel;
     private final Path currentDirectory;
     private final JTabbedPane tabbedPane;
     private final Runnable refreshTreeCallback;
@@ -43,13 +38,13 @@ public class FileOperations {
         void loadFile(Path file);
     }
 
-    public FileOperations(JPanel mainPanel, JEditorPane previewPane, Path currentDirectory, 
+    public FileOperations(JPanel mainPanel, CompositePreviewPanel previewPanel, Path currentDirectory,
                         JTabbedPane tabbedPane, Runnable refreshTreeCallback,
                         LoadFileCallback loadFileCallback, DocumentStateHandler documentStateHandler,
                         FileStateHandler fileStateHandler, DefaultTreeModel treeModel,
                         JTree fileTree) {
         this.mainPanel = mainPanel;
-        this.previewPane = previewPane;
+        this.previewPanel = previewPanel;
         this.currentDirectory = currentDirectory;
         this.tabbedPane = tabbedPane;
         this.refreshTreeCallback = refreshTreeCallback;
@@ -127,36 +122,30 @@ public class FileOperations {
         }
     }
 
-    public void loadImagePreview(Path file, Color backgroundColor, Color foregroundColor, TableOfContents tableOfContents) {
+    public void loadImagePreview(Path file, TableOfContents tableOfContents) {
+        Color backgroundColor = Gui.getColor("color.bg");
+        Color foregroundColor = Gui.getColor("color.fg");
         try {
             // Clear TOC for image files
             tableOfContents.updateToc("", null);
 
             // Disable edit tab for images
             tabbedPane.setEnabledAt(0, false);
-            
+
             // Switch to preview tab
             tabbedPane.setSelectedIndex(1);
-            
+
             // Load and scale the image
             BufferedImage img = ImageIO.read(file.toFile());
             if (img != null) {
-                // Calculate scaling to fit preview pane while maintaining aspect ratio
-                double scale = Math.min(
-                    (double) 800 / img.getWidth(),
-                    (double) 600 / img.getHeight()
-                );
-                
-                // Only scale down, not up
+                double scale = Math.min(800.0 / img.getWidth(), 600.0 / img.getHeight());
                 if (scale < 1.0) {
-                    int newWidth = (int) (img.getWidth() * scale);
+                    int newWidth  = (int) (img.getWidth()  * scale);
                     int newHeight = (int) (img.getHeight() * scale);
-                    
-                    // Create centered HTML for the image
-                    String html = String.format("""
+                    previewPanel.setDirectHtml(String.format("""
                         <html>
                         <body style='text-align: center; margin: 0; padding: 20px; background-color: %s;'>
-                            <img src='%s' width='%d' height='%d' 
+                            <img src='%s' width='%d' height='%d'
                                 style='display: block; margin: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.2);'>
                             <p style='color: %s; font-family: Arial; margin-top: 10px;'>
                                 Original size: %dx%d
@@ -164,36 +153,26 @@ public class FileOperations {
                         </body>
                         </html>
                         """,
-                        getHexColor(backgroundColor),
-                        file.toUri(),
-                        newWidth,
-                        newHeight,
+                        getHexColor(backgroundColor), file.toUri(),
+                        newWidth, newHeight,
                         getHexColor(foregroundColor),
-                        img.getWidth(),
-                        img.getHeight()
-                    );
-                    previewPane.setText(html);
+                        img.getWidth(), img.getHeight()));
                 } else {
-                    // Show original size
-                    String html = String.format("""
+                    previewPanel.setDirectHtml(String.format("""
                         <html>
                         <body style='text-align: center; margin: 0; padding: 20px; background-color: %s;'>
-                            <img src='%s' width='%d' height='%d' 
+                            <img src='%s' width='%d' height='%d'
                                 style='display: block; margin: auto; box-shadow: 0 2px 8px rgba(0,0,0,0.2);'>
                         </body>
                         </html>
                         """,
-                        getHexColor(backgroundColor),
-                        file.toUri(),
-                        img.getWidth(),
-                        img.getHeight()
-                    );
-                    previewPane.setText(html);
+                        getHexColor(backgroundColor), file.toUri(),
+                        img.getWidth(), img.getHeight()));
                 }
             }
         } catch (IOException e) {
             e.printStackTrace();
-            previewPane.setText("<html><body><center>Error loading image: " + e.getMessage() + "</center></body></html>");
+            previewPanel.setDirectHtml("<html><body><center>Error loading image: " + e.getMessage() + "</center></body></html>");
         }
     }
 

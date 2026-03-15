@@ -40,7 +40,6 @@ public class SearchUtils {
     }
     
     public static List<Integer> findAllPositions(String content, String searchTerm, boolean caseSensitive) {
-        // Previous implementation remains the same
         List<Integer> positions = new ArrayList<>();
         if (searchTerm.isEmpty() || content.isEmpty()) {
             return positions;
@@ -89,9 +88,8 @@ public class SearchUtils {
         return results;
     }
     
-    public static void highlightText(JTextComponent textComponent, String searchTerm, 
+    public static void highlightText(JTextComponent textComponent, String searchTerm,
             boolean caseSensitive) {
-        // Previous implementation remains the same
         Highlighter highlighter = textComponent.getHighlighter();
         highlighter.removeAllHighlights();
         
@@ -308,7 +306,6 @@ public class SearchUtils {
             }
         });
         
-        // Previous code for search handler...
         searchField.addActionListener(e -> {
             String searchTerm = searchField.getText();
             if (!searchTerm.isEmpty()) {

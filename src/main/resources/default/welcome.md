@@ -14,9 +14,9 @@ To import or paste an image, click the `Import Image` button, and paste/drag the
 
 Click to jump to this address in the binary - saves having to copy addresses all the time...
 
-[0x1c9954]
+[0xf802805c]
 
-[34038b]
+[f802805c]
 
 ## Modification-Safe Function Names
 
@@ -24,9 +24,27 @@ In notes, instead of writing the function name you are currently using, you can 
 
 *Note*: Will display the address if a function does not exist at the address - the below examples will not display the function as there probably isn't one at that exact location in your binary!
 
-{0x1c9954}
+{0xf802805c}
 
-{1c9954}
+{f802805c}
+
+## Inline Ghidra Decompiler Snippets
+
+For ghidra snippets without needing to copy and paste everything - note that modifications to the decompilation may mean you need to update the line numbers used in the snippet.
+
+Click the snippet to redirect to the function the snippet is from!
+
+Entire function snippet:
+
+{0xf802805c}[]
+
+Single line snippet:
+
+{f802805c}[10]
+
+Multi line snippet:
+
+{0xf802805c}[10-20]
 
 ## Text Formatting
 

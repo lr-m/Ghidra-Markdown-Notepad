@@ -2,18 +2,21 @@ package ghidra.notepad;
 
 import generic.theme.Gui;
 import javax.swing.*;
+import javax.swing.Timer; // disambiguate from java.util.Timer
 import javax.swing.tree.*;
 import java.awt.*;
 import java.util.*;
 import java.util.regex.*;
-import javax.swing.Timer;
 
 public class TableOfContents extends JPanel {
     private final JTree tocTree;
     private final DefaultMutableTreeNode rootNode;
     private final DefaultTreeModel treeModel;
-    private final javax.swing.Timer updateTimer;
+    private final Timer updateTimer;
+    private final JScrollPane scrollPane;
+    private final DefaultTreeCellRenderer renderer;
     private TocCallback callback;
+    private String currentContent;
     
     public interface TocCallback {
         void jumpToPosition(int position);
@@ -57,26 +60,13 @@ public class TableOfContents extends JPanel {
         tocTree.setRootVisible(false);
         
         // Create a debounced timer for updates
-        updateTimer = new javax.swing.Timer(300, e -> performUpdate());
+        updateTimer = new Timer(300, e -> performUpdate());
         updateTimer.setRepeats(false);
         
-        // Get system colors from Gui
-        Color background = Gui.getColor("color.bg");
-        Color foreground = Gui.getColor("color.fg");
-        Color selectionBackground = Gui.getColor("color.bg.selection");
-        Color selectionForeground = Gui.getColor("color.fg");
-        
-        // Set background colors
-        setBackground(background);
-        tocTree.setBackground(background);
-        tocTree.setForeground(foreground);
-        
-        JScrollPane scrollPane = new JScrollPane(tocTree);
-        scrollPane.setBackground(background);
-        scrollPane.getViewport().setBackground(background);
-        
-        // Set tree renderer to handle colors properly
-        DefaultTreeCellRenderer renderer = new DefaultTreeCellRenderer() {
+        scrollPane = new JScrollPane(tocTree);
+
+        // Renderer always reads current theme colors at render time
+        renderer = new DefaultTreeCellRenderer() {
             @Override
             public Component getTreeCellRendererComponent(JTree tree, Object value,
                     boolean sel, boolean expanded, boolean leaf, int row,
@@ -84,20 +74,14 @@ public class TableOfContents extends JPanel {
                 Component c = super.getTreeCellRendererComponent(tree, value, sel,
                     expanded, leaf, row, hasFocus);
                 if (!sel) {
-                    c.setBackground(background);
-                    c.setForeground(foreground);
+                    c.setBackground(Gui.getColor("color.bg"));
+                    c.setForeground(Gui.getColor("color.fg"));
                 }
                 return c;
             }
         };
-        
-        // Set renderer colors
-        renderer.setBackgroundNonSelectionColor(background);
-        renderer.setBackgroundSelectionColor(selectionBackground);
-        renderer.setTextNonSelectionColor(foreground);
-        renderer.setTextSelectionColor(selectionForeground);
-        
         tocTree.setCellRenderer(renderer);
+        applyThemeColors();
         
         // Add selection listener
         tocTree.addTreeSelectionListener(e -> {
@@ -112,8 +96,29 @@ public class TableOfContents extends JPanel {
         add(scrollPane, BorderLayout.CENTER);
     }
 
-    private String currentContent;
-    
+    private void applyThemeColors() {
+        Color background = Gui.getColor("color.bg");
+        Color foreground = Gui.getColor("color.fg");
+        Color selectionBackground = Gui.getColor("color.bg.selection");
+
+        setBackground(background);
+        tocTree.setBackground(background);
+        tocTree.setForeground(foreground);
+        scrollPane.setBackground(background);
+        scrollPane.getViewport().setBackground(background);
+
+        renderer.setBackgroundNonSelectionColor(background);
+        renderer.setBackgroundSelectionColor(selectionBackground);
+        renderer.setTextNonSelectionColor(foreground);
+        renderer.setTextSelectionColor(foreground);
+    }
+
+    public void refreshColors() {
+        applyThemeColors();
+        tocTree.repaint();
+        repaint();
+    }
+
     public void scheduleUpdate(String content) {
         currentContent = content;
         updateTimer.restart();

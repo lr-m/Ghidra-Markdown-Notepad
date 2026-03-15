@@ -182,24 +182,24 @@ public class ActionManager {
             "/images/zoom_out.png", "Zoom out");
 
         // Back
-        DockingAction backAction = new DockingAction("Back", provider.getName()) {
+        backAction = new DockingAction("Back", provider.getName()) {
             @Override
             public void actionPerformed(ActionContext context) {
                 provider.navigateBack();
             }
         };
-        configureAction("Navigate", backAction, "Back", 
+        configureAction("Navigate", backAction, "Back",
             KeyStroke.getKeyStroke(KeyEvent.VK_LEFT, InputEvent.ALT_DOWN_MASK),
             "/images/back.png", "Go back");
 
         // Forward
-        DockingAction forwardAction = new DockingAction("Forward", provider.getName()) {
+        forwardAction = new DockingAction("Forward", provider.getName()) {
             @Override
             public void actionPerformed(ActionContext context) {
                 provider.navigateForward();
             }
         };
-        configureAction("Navigate", forwardAction, "Forward", 
+        configureAction("Navigate", forwardAction, "Forward",
             KeyStroke.getKeyStroke(KeyEvent.VK_RIGHT, InputEvent.ALT_DOWN_MASK),
             "/images/forward.png", "Go forward");
     }

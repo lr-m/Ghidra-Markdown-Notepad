@@ -11,7 +11,6 @@ import java.util.HashMap;
 import javax.imageio.ImageIO;
 
 import generic.theme.Gui;
-import ghidra.notepad.DocumentStateHandler;
 
 public class FileTreeCellRenderer extends DefaultTreeCellRenderer {
     private static final int THUMBNAIL_SIZE = 16; // Size to match other icons

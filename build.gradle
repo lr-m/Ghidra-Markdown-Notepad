@@ -13,7 +13,7 @@
 * See the License for the specific language governing permissions and
 * limitations under the License.
 */
-def ghidraInstallDir = System.getenv("GHIDRA_INSTALL_DIR") ?: "/files/out/ghidra_11.2.1_DEV"
+def ghidraInstallDir = System.getenv("GHIDRA_INSTALL_DIR") ?: "/files/out/ghidra_12.0.4_DEV"
 apply from: "${ghidraInstallDir}/support/buildExtension.gradle"
 apply plugin: 'eclipse'
 eclipse.project.name = 'Xtra sample'

@@ -22,6 +22,7 @@ public class MarkdownNotepadPlugin extends Plugin {
 
     @Override
     public void dispose() {
+        provider.cleanup();
         provider.setVisible(false);
     }
 }

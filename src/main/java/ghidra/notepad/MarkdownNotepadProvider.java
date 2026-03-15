@@ -1,38 +1,23 @@
 package ghidra.notepad;
 
+import ghidra.app.decompiler.DecompInterface;
+import ghidra.app.decompiler.DecompileResults;
+import ghidra.app.events.ProgramLocationPluginEvent;
+import ghidra.app.services.ProgramManager;
 import ghidra.framework.options.Options;
 import ghidra.framework.plugintool.ComponentProviderAdapter;
 import ghidra.framework.plugintool.PluginTool;
+import ghidra.program.model.address.Address;
+import ghidra.program.model.listing.Program;
+import ghidra.program.util.ProgramLocation;
+import ghidra.util.task.ConsoleTaskMonitor;
+
+import generic.theme.Gui;
+import generic.theme.ThemeListener;
 
 import org.commonmark.ext.gfm.tables.TablesExtension;
-import org.commonmark.node.Node;
 import org.commonmark.parser.Parser;
 import org.commonmark.renderer.html.HtmlRenderer;
-
-import java.awt.BorderLayout;
-import java.awt.Dimension;
-import java.awt.Color;
-
-import java.awt.datatransfer.DataFlavor;
-import java.awt.datatransfer.Transferable;
-import java.awt.datatransfer.UnsupportedFlavorException;
-
-import java.io.File;
-import java.io.IOException;
-import java.nio.file.*;
-
-import java.util.List;
-import java.util.Map;
-import java.util.Arrays;
-import java.util.ArrayList;
-import java.util.HashMap;
-
-import javax.swing.*;
-import javax.swing.tree.*;
-import javax.swing.event.DocumentListener;
-
-import java.awt.event.MouseAdapter;
-import java.awt.event.MouseEvent;
 
 import org.fife.ui.rsyntaxtextarea.*;
 import org.fife.ui.rtextarea.RTextScrollPane;
@@ -40,63 +25,22 @@ import org.fife.ui.rtextarea.RTextScrollPane;
 import docking.*;
 import docking.action.*;
 
-import ghidra.program.util.ProgramLocation;
-import ghidra.program.model.address.Address;
-import ghidra.program.model.listing.Program;
-import ghidra.app.events.ProgramLocationPluginEvent;
-import ghidra.app.services.ProgramManager;
-
-import javax.swing.TransferHandler;
-import java.awt.dnd.*;
-
-import java.awt.Rectangle;
-import java.util.Collections;
-import java.util.List;
-import java.awt.event.KeyAdapter;
-import java.awt.event.KeyEvent;
+import javax.swing.*;
 import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
-
-// Add these imports to MarkdownNotepadProvider.java
-import java.awt.FlowLayout;
-import java.awt.Font;
-import java.awt.Component;
-import javax.swing.text.html.HTMLDocument;
-
-// Make sure these are already present
-import javax.swing.*;
-import java.awt.*;
-import java.awt.event.*;
-import javax.swing.text.*;
-import java.nio.file.*;
-import java.io.IOException;
-import java.util.*;
-import docking.*;
-import ghidra.framework.options.Options;
-import ghidra.framework.plugintool.ComponentProviderAdapter;
-import ghidra.framework.plugintool.PluginTool;
-import ghidra.program.model.listing.Program;
 import javax.swing.tree.*;
 
-import generic.theme.Gui;
+import java.awt.*;
+import java.awt.datatransfer.DataFlavor;
+import java.awt.datatransfer.Transferable;
+import java.awt.datatransfer.UnsupportedFlavorException;
+import java.awt.dnd.*;
+import java.awt.event.*;
 
-import javax.swing.text.html.StyleSheet;
-import javax.swing.text.html.HTMLEditorKit;
-
-import ghidra.notepad.SearchUtils.SearchResultCallback;
-import ghidra.notepad.DocumentState;
-import ghidra.notepad.ImageImportDialog;
-import ghidra.notepad.ActionManager;
-import ghidra.notepad.EditorUtils;
-import ghidra.notepad.PreviewUtils;
-import ghidra.notepad.FileOperations;
-import ghidra.notepad.FileNode;
-import ghidra.notepad.FileTreeCellRenderer;
-import ghidra.notepad.DocumentStateHandler;
-import ghidra.notepad.FileStateHandler;
-import ghidra.notepad.SearchUtils;
-import ghidra.notepad.NavigationHistory;
-import ghidra.notepad.TableOfContents;
+import java.io.IOException;
+import java.nio.file.*;
+import java.util.*;
+import java.util.List; // disambiguate from java.awt.List
 
 /**
  * Core component provider that implements the main notepad interface.
@@ -120,7 +64,7 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
     private List<DocumentListener> documentListeners;
 
     private JTabbedPane tabbedPane;
-    private JEditorPane previewPane;
+    private CompositePreviewPanel previewPanel;
     private Parser markdownParser;
     private HtmlRenderer htmlRenderer;
     private javax.swing.Timer previewUpdateTimer;
@@ -128,7 +72,6 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
     private Program currentProgram;
 
     private ActionManager actionManager;
-    private PreviewUtils previewUtils;
     private FileOperations fileOperations;
     private TreeOperations treeOperations;
 
@@ -144,6 +87,8 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
     private JSplitPane verticalSplitPane;
     private float currentZoomFactor = 1.0f;
 
+    private final ThemeListener themeListener = event -> refreshTheme();
+
     public MarkdownNotepadProvider(PluginTool tool, String owner) {
         super(tool, WINDOW_TITLE, owner);
         setIcon(new ImageIcon(getClass().getResource("/images/logo.png")));
@@ -157,7 +102,7 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         
         fileOperations = new FileOperations(
             mainPanel,
-            previewPane,
+            previewPanel,
             currentDirectory,
             tabbedPane,
             this::refreshTree,
@@ -170,7 +115,12 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         actionManager = new ActionManager(this, tool);
         loadLastCollection();
         loadZoomPreference();
+        Gui.addThemeListener(themeListener);
         setVisible(true);
+    }
+
+    public void cleanup() {
+        Gui.removeThemeListener(themeListener);
     }
 
     public Path getCurrentDirectory() {
@@ -188,6 +138,11 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         }
     }
 
+    private Path getProjectNotepadDirectory() {
+        if (tool.getProject() == null) return null;
+        return tool.getProject().getProjectLocator().getProjectDir().toPath().resolve("notepad");
+    }
+
     private void loadLastCollection() {
         Options options = tool.getOptions("MarkdownNotepad");
         String lastCollectionPath = options.getString(LAST_COLLECTION_PREFERENCE, null);
@@ -195,8 +150,84 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
             Path path = Paths.get(lastCollectionPath);
             if (Files.exists(path) && Files.isDirectory(path)) {
                 loadDirectory(path);
+                return;
             }
         }
+
+        Path projectNotepadDir = getProjectNotepadDirectory();
+        if (projectNotepadDir != null && Files.exists(projectNotepadDir)) {
+            loadDirectory(projectNotepadDir);
+            return;
+        }
+
+        SwingUtilities.invokeLater(this::showFirstTimeSetupDialog);
+    }
+
+    private void showFirstTimeSetupDialog() {
+        Path projectNotepadDir = getProjectNotepadDirectory();
+
+        JDialog dialog = new JDialog(tool.getActiveWindow(), "Markdown Notepad",
+            Dialog.ModalityType.APPLICATION_MODAL);
+        dialog.setLayout(new BorderLayout());
+
+        JLabel messageLabel = new JLabel(
+            "<html><body style='padding: 10px;'>" +
+            "No <b>.rep/notepad</b> directory detected in project.<br><br>" +
+            "How would you like to set up your notes collection?" +
+            "</body></html>");
+        messageLabel.setBorder(BorderFactory.createEmptyBorder(15, 20, 5, 20));
+
+        JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.CENTER, 10, 10));
+
+        JButton createProjectDirButton = new JButton("Create .rep/notepad");
+        JButton createNewButton = new JButton("Create New Collection");
+        JButton loadExistingButton = new JButton("Load Existing Collection");
+
+        createProjectDirButton.setEnabled(projectNotepadDir != null);
+        dialog.getRootPane().setDefaultButton(createProjectDirButton);
+
+        createProjectDirButton.addActionListener(e -> {
+            dialog.dispose();
+            try {
+                Files.createDirectories(projectNotepadDir);
+                fileOperations.createCollectionStructure(projectNotepadDir);
+                loadDirectory(projectNotepadDir);
+            } catch (IOException ex) {
+                JOptionPane.showMessageDialog(mainPanel,
+                    "Error creating .rep/notepad: " + ex.getMessage(),
+                    "Error", JOptionPane.ERROR_MESSAGE);
+            }
+        });
+
+        createNewButton.addActionListener(e -> {
+            dialog.dispose();
+            createNewCollection();
+        });
+
+        loadExistingButton.addActionListener(e -> {
+            dialog.dispose();
+            JFileChooser chooser = new JFileChooser();
+            chooser.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
+            if (chooser.showOpenDialog(mainPanel) == JFileChooser.APPROVE_OPTION) {
+                Path selectedPath = chooser.getSelectedFile().toPath();
+                if (Files.exists(selectedPath) && Files.isDirectory(selectedPath)) {
+                    loadDirectory(selectedPath);
+                }
+            }
+        });
+
+        buttonPanel.add(createProjectDirButton);
+        buttonPanel.add(createNewButton);
+        buttonPanel.add(loadExistingButton);
+
+        dialog.add(messageLabel, BorderLayout.CENTER);
+        dialog.add(buttonPanel, BorderLayout.SOUTH);
+
+        dialog.pack();
+        dialog.setMinimumSize(new Dimension(480, 140));
+        dialog.setLocationRelativeTo(tool.getActiveWindow());
+        dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
+        dialog.setVisible(true);
     }
 
     private void navigateToAddress(String addressStr) {
@@ -245,48 +276,55 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         // Initialize editor
         editor = EditorUtils.createNewEditor();
         EditorUtils.applyEditorStyling(editor);
-        
-        // Create preview panel
-        previewPane = new JEditorPane();
-        previewPane.setEditable(false);
-        previewPane.setContentType("text/html");
-        previewPane.setBorder(null);
 
-        previewUtils = new PreviewUtils(previewPane, markdownParser, htmlRenderer, mainPanel, previewUpdateTimer, editor);
-        previewUtils.setAddressNavigationHandler(this::navigateToAddress);
-        
-        // Add function name resolution
-        previewUtils.setFunctionNameResolver(address -> {
-            // Get the program manager service
+        // Create composite preview panel (handles markdown + embedded decompiler sections)
+        previewPanel = new CompositePreviewPanel(markdownParser, htmlRenderer, mainPanel);
+        previewPanel.setAddressNavigationHandler(this::navigateToAddress);
+        previewPanel.setFunctionNameResolver(address -> {
             ProgramManager programManager = tool.getService(ProgramManager.class);
             if (programManager == null || programManager.getCurrentProgram() == null) {
                 return address;
             }
-
             try {
-                // Remove any '0x' prefix and convert to long
                 String cleanAddress = address.replaceAll("^0x", "");
                 long offset = Long.parseLong(cleanAddress, 16);
-                
-                // Get the address in the program
                 Program program = programManager.getCurrentProgram();
                 Address addr = program.getAddressFactory().getDefaultAddressSpace().getAddress(offset);
-                
-                // Try to get function at this address
-                ghidra.program.model.listing.Function function = 
+                ghidra.program.model.listing.Function function =
                     program.getFunctionManager().getFunctionAt(addr);
-                
-                // Return function name if found, otherwise return the address
                 return function != null ? function.getName() : address;
             } catch (Exception e) {
                 return address;
             }
         });
+        previewPanel.setDecompilationCallback(address -> {
+            ProgramManager programManager = tool.getService(ProgramManager.class);
+            if (programManager == null || programManager.getCurrentProgram() == null) return null;
+            Program program = programManager.getCurrentProgram();
+            try {
+                String cleanAddress = address.replaceAll("^0x", "");
+                long offset = Long.parseLong(cleanAddress, 16);
+                Address addr = program.getAddressFactory().getDefaultAddressSpace().getAddress(offset);
+                ghidra.program.model.listing.Function function =
+                    program.getFunctionManager().getFunctionAt(addr);
+                if (function == null) return null;
+                DecompInterface decomp = new DecompInterface();
+                decomp.openProgram(program);
+                DecompileResults results = decomp.decompileFunction(function, 30, new ConsoleTaskMonitor());
+                decomp.dispose();
+                if (results == null || !results.decompileCompleted()) return null;
+                String cText = results.getDecompiledFunction() != null
+                    ? results.getDecompiledFunction().getC() : null;
+                return new CompositePreviewPanel.DecompOutput(function, results.getCCodeMarkup(), cText);
+            } catch (Exception e) {
+                return null;
+            }
+        });
 
         // Create preview update timer
-        previewUpdateTimer = new javax.swing.Timer(500, e -> previewUtils.updatePreview(editor.getText()));
+        previewUpdateTimer = new javax.swing.Timer(500, e -> previewPanel.updatePreview(editor.getText()));
         previewUpdateTimer.setRepeats(false);
-        
+
         // Create tabbed pane
         tabbedPane = new JTabbedPane();
         tabbedPane.setFocusable(false);
@@ -295,12 +333,9 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         RTextScrollPane editScrollPane = new RTextScrollPane(editor, true);
         editScrollPane.setBorder(null);
 
-        JScrollPane previewScrollPane = new JScrollPane(previewPane);
-        previewScrollPane.setBorder(null);
-
         // Add components to tabs
         tabbedPane.addTab("Edit", editScrollPane);
-        tabbedPane.addTab("Preview", previewScrollPane);
+        tabbedPane.addTab("Preview", previewPanel);
 
         // Initialize file tree components
         rootNode = new DefaultMutableTreeNode("Open/Create a Collection...");
@@ -308,7 +343,7 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         fileTree = new JTree(treeModel);
         fileTree.setDragEnabled(true);
         fileTree.setDropMode(DropMode.ON_OR_INSERT);
-        fileTree.setTransferHandler(new FileTreeTransferHandler());                            // And this line
+        fileTree.setTransferHandler(new FileTreeTransferHandler());
         
         // Set file tree properties
         fileTree.setRowHeight(0);
@@ -492,11 +527,11 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
                 updateDocumentStates(oldPath, newPath);
                 
                 // Update paths in other components
-                previewUtils.setCurrentDirectory(newPath);
+                previewPanel.setCurrentDirectory(newPath);
                 treeOperations.setCurrentDirectory(newPath);
                 fileOperations = new FileOperations(
                     mainPanel,
-                    previewPane,
+                    previewPanel,
                     newPath,
                     tabbedPane,
                     this::refreshTree,
@@ -533,7 +568,7 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
                 
                 if (currentFile != null && currentFile.equals(path)) {
                     currentFile = newPathResolved;
-                    previewUtils.setCurrentFile(currentFile);
+                    previewPanel.setCurrentFile(currentFile);
                 }
             } else {
                 newStates.put(path, state);
@@ -561,13 +596,13 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
     @Override
     public void setCurrentFile(Path file) {
         currentFile = file;
-        previewUtils.setCurrentFile(file);
+        previewPanel.setCurrentFile(file);
     }
 
     @Override
     public void clearCurrentFile() {
         currentFile = null;
-        previewUtils.setCurrentFile(null);
+        previewPanel.setCurrentFile(null);
     }
 
     @Override
@@ -606,7 +641,6 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         });
     }
 
-    // Modify the loadFile method to add editor listeners
     private void loadFile(Path file) {
         // Add to navigation history
         navigationHistory.addLocation(file);
@@ -625,13 +659,13 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         }
         
         currentFile = file;
-        previewUtils.setCurrentFile(currentFile);
+        previewPanel.setCurrentFile(currentFile);
         String fileName = file.getFileName().toString().toLowerCase();
         
         // Check if this is an image file
         if (fileName.endsWith(".png") || fileName.endsWith(".jpg") || 
             fileName.endsWith(".jpeg")) {
-            fileOperations.loadImagePreview(file, editor.getBackground(), editor.getForeground(), tableOfContents);
+            fileOperations.loadImagePreview(file, tableOfContents);
             return;
         }
         
@@ -666,20 +700,15 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         currentDocument.applyZoom(currentZoomFactor);
         
         // Update preview
-        previewUtils.updatePreview(editor.getText());
-        
+        previewPanel.updatePreview(editor.getText());
+
         // Update table of contents with initial content
         tableOfContents.updateToc(editor.getText(), position -> {
             if (tabbedPane.getSelectedIndex() == 0) {
                 editor.setCaretPosition(position);
                 editor.requestFocusInWindow();
             } else {
-                try {
-                    previewPane.scrollRectToVisible(
-                        previewPane.modelToView(position));
-                } catch (Exception e) {
-                    e.printStackTrace();
-                }
+                previewPanel.scrollToMarkdownPosition(position);
             }
         });
         
@@ -688,45 +717,36 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
     }
 
     public void loadDirectory(Path directory) {
-        // Reset all state when loading a new collection
         clearEditorAndPreview();
         navigationHistory.reset();
         updateNavigationButtons();
-        documentStates.clear();
 
         currentDirectory = directory;
         treeOperations.setCurrentDirectory(directory);
-        previewUtils.setCurrentDirectory(currentDirectory);
-        rootNode.removeAllChildren();
-        rootNode.setUserObject(directory.getFileName().toString());
+        previewPanel.setCurrentDirectory(currentDirectory);
+        treeOperations.refreshTree();
+        saveCollectionPreference(directory);
+    }
 
-        try {
-            // First, create the directory structure
-            Files.walk(directory)
-                .filter(Files::isDirectory)
-                .forEach(dir -> treeOperations.addDirectoryToTree(dir));
+    private void refreshTheme() {
+        SwingUtilities.invokeLater(() -> {
+            // Re-apply syntax highlighting to every open document editor
+            documentStates.values().forEach(state -> EditorUtils.applyEditorStyling(state.getEditor()));
+            // Also re-apply to the current editor if it has no document state yet
+            if (currentDocument == null) {
+                EditorUtils.applyEditorStyling(editor);
+            }
 
-            // Then add both markdown and image files
-            Files.walk(directory)
-                .filter(Files::isRegularFile)
-                .filter(p -> {
-                    String name = p.toString().toLowerCase();
-                    return name.endsWith(".md") || 
-                        name.endsWith(".png") || 
-                        name.endsWith(".jpg") || 
-                        name.endsWith(".jpeg") || 
-                        name.endsWith(".gif");
-                })
-                .forEach(file -> treeOperations.addFileToTree(file));
-                
-            // Save the collection path preference
-            saveCollectionPreference(directory);
-        } catch (IOException e) {
-            e.printStackTrace();
-        }
-        
-        treeModel.reload();
-        fileTree.expandRow(0);
+            // Rebuild preview CSS using the new theme colors, then re-render
+            previewPanel.refreshTheme();
+
+            // Recreate file tree renderer (colors are fetched in its constructor)
+            fileTree.setCellRenderer(new FileTreeCellRenderer(this, rootNode));
+            fileTree.repaint();
+
+            // Refresh TOC colors
+            tableOfContents.refreshColors();
+        });
     }
 
     private void clearEditorAndPreview() {
@@ -735,7 +755,7 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         editor.discardAllEdits();
         
         // Clear the preview
-        previewPane.setText("");
+        previewPanel.updatePreview("");
         
         // Clear current file references
         currentFile = null;
@@ -763,7 +783,6 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
         }
     }
     
-    // Update the existing updateUndoRedoActions method
     private void updateUndoRedoActions() {
         boolean canUndo = currentDocument != null && currentDocument.getEditor().canUndo();
         boolean canRedo = currentDocument != null && currentDocument.getEditor().canRedo();
@@ -848,7 +867,6 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
     }
 
 
-    // Update the save functionality:
     public void saveCurrentFile() {
         if (currentFile != null && currentDocument != null) {
             fileOperations.saveFile(currentFile, currentDocument.getContent());
@@ -1221,29 +1239,9 @@ public class MarkdownNotepadProvider extends ComponentProviderAdapter
             editor.setFont(currentFont.deriveFont(newSize));
         }
         
-        // Update preview font sizes
-        float baseFontSize = 14.0f;
-        StyleSheet styleSheet = ((HTMLEditorKit)previewPane.getEditorKit()).getStyleSheet();
-        
-        // Base text size
-        styleSheet.addRule("body { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
-        styleSheet.addRule("p { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
-        
-        // Headers
-        styleSheet.addRule("h1 { font-size: " + (baseFontSize * 2.0 * currentZoomFactor) + "px; }");
-        styleSheet.addRule("h2 { font-size: " + (baseFontSize * 1.8 * currentZoomFactor) + "px; }");
-        styleSheet.addRule("h3, h4, h5, h6 { font-size: " + (baseFontSize * 1.5 * currentZoomFactor) + "px; }");
-        
-        // Other elements
-        styleSheet.addRule("code { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
-        styleSheet.addRule("pre { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
-        styleSheet.addRule("blockquote { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
-        styleSheet.addRule("li { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
-        styleSheet.addRule("td, th { font-size: " + (baseFontSize * currentZoomFactor) + "px; }");
-        
-        // Force preview refresh
-        String currentContent = editor.getText();
-        previewUtils.updatePreview(currentContent);
+        // Update preview font sizes — zoom is baked in when each HTML section is rendered
+        previewPanel.setZoomFactor(currentZoomFactor);
+        previewPanel.refreshTheme(); // rebuilds stylesheets with new zoom
         
         // Save zoom preference
         Options options = tool.getOptions("MarkdownNotepad");
