@@ -31,6 +31,9 @@ And for the light-mode sadists:
 - Using `[0x1234]` syntax to make addresses clickable in the preview (makes Ghidra go to that address)
 - Using `{0x5678}` syntax to create an address link that is previewed as the function name at that address (no more fear of inconsistent function names for the same function in notes!)
 - Inline Ghidra decompilation snippets, use {0x1234}[10-20] to include lines 10-20 at the address specified (clicking snippet redirects to function)
+
+![crayon.png](/readme_images/snippet.png)
+
 - Ghidra theme integration (syntax highlighting and preview colours match the selected Ghidra theme)
 - Auto-opening of same collection on restart
 - Search all documents, easy to flick through results with arrow keys
@@ -95,7 +98,7 @@ And for the light-mode sadists:
 ## Requirements
 
 - Ghidra
-- If you want to build it from source, I use [https://github.com/lr-m/Ghidra-Plug](Ghidra-Plug), then install the plugin
+- If you want to build it from source, I use [Ghidra-Plug](https://github.com/lr-m/Ghidra-Plug), then install the plugin
 
 ## Installation
 
